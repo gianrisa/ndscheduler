@@ -1,0 +1,143 @@
+--- ndscheduler/server/server.py
++++ ndscheduler/server/server.py
+@@ -84,6 +84,7 @@
+             cls.singleton.start_scheduler()
+             cls.singleton.application.listen(settings.HTTP_PORT, settings.HTTP_ADDRESS)
+             logger.info('Running server at %s:%d ...' % (settings.HTTP_ADDRESS, settings.HTTP_PORT))
++            logger.info(settings.STATIC_DIR_PATH)
+             logger.info('*** You can access scheduler web ui at http://localhost:%d'
+                         ' ***' % settings.HTTP_PORT)
+             tornado.ioloop.IOLoop.instance().start()
+--- ndscheduler/static/index.html
++++ ndscheduler/static/index.html
+@@ -186,7 +186,7 @@
+             </div>
+         </div>
+     </div>
+-    <script data-main="/static/js/app" src="/static/js/vendor/require.js"></script>
++    <script data-main="/scheduler/static/js/app" src="/scheduler/static/js/vendor/require.js"></script>
+ </body>
+ 
+ <script id="jobs-meta-info" type="application/json">
+--- ndscheduler/static/js/app.js
++++ ndscheduler/static/js/app.js
+@@ -1,6 +1,6 @@
+ require.config({
+   urlArgs: 'bust=' + cacheBuster,
+-  baseUrl: '/static/js',
++  baseUrl: '/scheduler/static/js',
+   paths: {
+     'jquery': 'vendor/jquery',
+     'backbone': 'vendor/backbone',
+--- ndscheduler/static/js/config.js
++++ ndscheduler/static/js/config.js
+@@ -7,7 +7,7 @@
+ 
+   'use strict';
+ 
+-  var urlPrefix = '/api/v1';
++  var urlPrefix = 'api/v1';
+ 
+   return {
+     'jobs_url': urlPrefix + '/jobs',
+--- ndscheduler/static/js/models/execution.js
++++ ndscheduler/static/js/models/execution.js
+@@ -43,8 +43,8 @@
+         jobName = '<span class="failed-color">Unknown Job</span>';
+       }
+ 
+-      return '<a href="/#executions/' + executionId +
+-          '"><i class="fa fa-link fa-lg"></i></a> <a href="/#jobs/' + jobId +
++      return '<a href="/scheduler/#executions/' + executionId +
++          '"><i class="fa fa-link fa-lg"></i></a> <a href="/scheduler/#jobs/' + jobId +
+           '">' + jobName + '</a>';
+     },
+ 
+--- ndscheduler/static/js/models/log.js
++++ ndscheduler/static/js/models/log.js
+@@ -37,7 +37,7 @@
+     getJobNameHTMLString: function() {
+       var jobName = this.get('job_name'),
+           jobId = this.get('job_id');
+-      return '<a href="/#jobs/' + jobId + '">' + jobName + '</a>';
++      return '<a href="/scheduler/#jobs/' + jobId + '">' + jobName + '</a>';
+     },
+ 
+     /**
+@@ -86,7 +86,7 @@
+       if (event === 'custom_run') {
+         // TODO (wenbin): Make a beautiful popup window to display this info,
+         // instead of linking to raw json.
+-        descHtml = 'Execution ID: <a href="/#executions/' +
++        descHtml = 'Execution ID: <a href="/scheduler/#executions/' +
+             desc + '">' + desc + '</a>';
+       } else if (event === 'modified') {
+         descHtml = 'diff: old val => new val <br>' + desc;
+--- ndscheduler/static/js/templates/job-row-name.html
++++ ndscheduler/static/js/templates/job-row-name.html
+@@ -1,4 +1,4 @@
+-<a href="/#jobs/<%= job_id %>"><i class="fa fa-link fa-lg"></i></a>
++<a href="/scheduler/#jobs/<%= job_id %>"><i class="fa fa-link fa-lg"></i></a>
+ 
+ <a href="#" title="<%= job_class %>(<%= job_pubargs %>)"
+    data-toggle="modal"
+--- simple_scheduler/requirements.txt
++++ simple_scheduler/requirements.txt
+@@ -1,7 +1,7 @@
+ # Additional dependencies for simple_scheduler only
+ 
+ # This apns library's release version still doesn't support python 3.5!
+-git+git://github.com/djacobs/PyAPNs.git#egg=PyAPNs
++git+https://github.com/djacobs/PyAPNs.git#egg=PyAPNs
+ 
+ requests == 2.9.1
+ 
+--- simple_scheduler/settings.py
++++ simple_scheduler/settings.py
+@@ -5,9 +5,9 @@
+ #
+ # Override settings
+ #
+-DEBUG = True
++DEBUG = False
+ 
+-HTTP_PORT = 8888
++HTTP_PORT = 9000
+ HTTP_ADDRESS = '0.0.0.0'
+ 
+ #
+--- setup.py
++++ setup.py
+@@ -86,6 +86,7 @@ setup(
+         'future == 0.15.2',
+         'tornado == 4.3.0',
+         'python-dateutil == 2.2',
++        'tornado-http-auth == 1.1.1',
+     ],
+     classifiers=classifiers,
+     cmdclass={'clean': CleanHook},
+
+--- ndscheduler/server/handlers/base.py
++++ ndscheduler/server/handlers/base.py
+@@ -12,9 +12,12 @@ import tornado.ioloop
+ import tornado.web
+ 
+ from ndscheduler import settings
++from tornado_http_auth import BasicAuthMixin
+ 
++credentials = {'stock': 'pass'}
+ 
+-class BaseHandler(tornado.web.RequestHandler):
++
++class BaseHandler(BasicAuthMixin, tornado.web.RequestHandler):
+ 
+     executor = futures.ThreadPoolExecutor(max_workers=settings.TORNADO_MAX_WORKERS)
+ 
+@@ -30,6 +33,7 @@ class BaseHandler(tornado.web.RequestHandler):
+         self.username = self.get_username()
+         self.scheduler_manager = self.application.settings['scheduler_manager']
+         self.datastore = self.scheduler_manager.get_datastore()
++        self.get_authenticated_user(check_credentials_func=credentials.get, realm='Protected')
+ 
+     def get_username(self):
+         """Returns login username.
